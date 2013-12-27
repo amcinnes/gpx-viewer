@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>GPX Viewer</title>
+<style>
+html { width: 100%; height: 100%; }
+body { width: 100%; height: 100%; margin: 0; padding: 0; }
+#map { width: 100%; height: calc(100% - 30px); }
+#input { height: 30px; }
+</style>
+
+<script src="http://code.jquery.com/jquery-2.0.3.min.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?sensor=false&libraries=geometry"></script>
+<script src="http://cdnjs.cloudflare.com/ajax/libs/moment.js/2.4.0/moment.min.js"></script>
+<script>
+
+window.onload = function() {
+	var shapes = [];
+	var callout = null;
+	var point_times = [];
+
+	var clickHandler = function(e) {
+		// Remove previous callout, if any
+		if (callout!==null) {
+			callout.setMap(null);
+			callout = null;
+		}
+		// Add a callout on the nearest point to the click, giving the time at that point
+		var bestDistance = Infinity;
+		var bestPoint = null;
+		for (var i=0;i<point_times.length;i++) {
+			var d = google.maps.geometry.spherical.computeDistanceBetween(e.latLng,point_times[i][0]);
+			if (d<bestDistance) {
+				bestDistance = d;
+				bestPoint = point_times[i];
+			}
+		}
+		if (bestPoint!==null) {
+			callout = new google.maps.InfoWindow({
+				position: bestPoint[0],
+				content: "<div style='white-space: nowrap'>"+bestPoint[1]+"</div>",
+				map: map
+			});
+		}
+	};
+
+	var getTime = function(e) {
+		var t = e.children("time:first-of-type").text();
+		// Display as UTC to work around the fact that my GPX file actually contains local times incorrectly marked as UTC times
+		return moment(t).utc().format("HH:mm:ss");
+	}
+
+	var addTrackFromXML = function(map, x) {
+		// Takes a Google Maps object, and a GPX document as a jQuery XML object
+		// Draws the first track from the document onto the map
+
+		// Keep track of the bounding box so we can zoom to it later
+		var bounds = new google.maps.LatLngBounds();
+
+		point_times = [];
+
+		// For each trkseg in the first track:
+		$("gpx:root>trk:first-of-type>trkseg",x).each(function(i,e) {
+			// Add it to the map
+			var coords = [];
+			$(e).children("trkpt").each(function(i,e) {
+				var lat = parseFloat($(e).attr("lat"));
+				var lon = parseFloat($(e).attr("lon"));
+				var ll = new google.maps.LatLng(lat,lon)
+				bounds.extend(ll);
+				coords.push(ll);
+				// TODO get time
+				var time = getTime($(e));
+				point_times.push([ll,time]);
+			});
+			var pl = new google.maps.Polyline({
+				path: coords,
+				strokeColor: "#0000ff",
+				strokeOpacity: 1.0,
+				strokeWeight: 5,
+				map: map
+			});
+			shapes.push(pl);
+			google.maps.event.addListener(pl,'click',clickHandler);
+		});
+
+		// TODO center and scale the map to the bounding box of the track
+		map.setCenter(bounds.getCenter());
+		map.fitBounds(bounds);
+	}
+
+	var mapOptions = {
+		center: new google.maps.LatLng(0,0),
+		zoom: 3
+	};
+	var map = new google.maps.Map(document.getElementById("map"), mapOptions);
+
+	// When map is clicked:
+	google.maps.event.addListener(map,'click',clickHandler);
+
+	$("#file").change(function(e) {
+		var f = e.target.files[0];
+
+		// Clear previous track from map
+		for (var i=0;i<shapes.length;i++) {
+			shapes[i].setMap(null);
+		}
+		shapes = [];
+		// Clear callout, if any
+		if (callout!==null) {
+			callout.setMap(null);
+			callout = null;
+		}
+
+		if (f!==undefined) {
+			// Read file and add new track to map
+			var fr = new FileReader();
+			fr.onload = function() {
+				var x = $($.parseXML(fr.result));
+				addTrackFromXML(map,x);
+			}
+			fr.readAsText(f);
+
+		}
+	});
+	
+}
+
+</script>
+</head>
+<body>
+<div id="input">
+<input type="file" id="file">
+</div>
+<div id="map"></div>
+</body>
+</html>
